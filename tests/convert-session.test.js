@@ -57,6 +57,7 @@ function loadPageScript() {
   assert.ok(match, "expected docs/index.html to contain one inline script");
 
   const elements = new Map();
+  const createdElements = [];
   const formatButtons = ["sub2api", "cpa", "cockpit", "9router", "codex", "axonhub", "codexmanager"].map((format) =>
     createFakeElement(`[data-format="${format}"]`, { dataset: { format } })
   );
@@ -64,7 +65,9 @@ function loadPageScript() {
   const document = {
     body: createFakeElement("body"),
     createElement(selector) {
-      return createFakeElement(selector);
+      const element = createFakeElement(selector);
+      createdElements.push(element);
+      return element;
     },
     execCommand() {
       return true;
@@ -81,6 +84,7 @@ function loadPageScript() {
   };
 
   const context = {
+    Blob,
     TextDecoder,
     TextEncoder,
     URL: {
@@ -104,7 +108,7 @@ function loadPageScript() {
 
   vm.runInNewContext(match[1], context, { filename: "docs/index.html" });
 
-  return { elements, formatButtons };
+  return { createdElements, elements, formatButtons };
 }
 
 function dispatch(element, type) {
@@ -409,6 +413,35 @@ function testCodexManagerAuthJsonPreservesRealRefreshAndMetadata() {
   assert.equal(authJson.meta.chatgpt_account_id, "chatgpt-account-1");
 }
 
+function testDownloadedJsonFileNameIncludesFullEmail() {
+  const { createdElements, elements } = loadPageScript();
+  const input = elements.get("#session-input");
+  const downloadOutput = elements.get("#download-output");
+
+  input.value = JSON.stringify({
+    user: {
+      email: "mark@example.com",
+    },
+    accessToken: jwtWithPayload({
+      exp: 1780473960,
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "chatgpt-account-1",
+      },
+    }),
+  });
+  dispatch(input, "input");
+  dispatch(downloadOutput, "click");
+
+  const anchor = createdElements.find((element) => element.selector === "a");
+
+  assert.ok(anchor, "download should create an anchor element");
+  assert.match(
+    anchor.download,
+    /^mark@example\.com\.sub2api\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/,
+    "download filename should preserve the complete email address, including the domain suffix"
+  );
+}
+
 testSub2apiAccountUsesAccessTokenExpiry();
 testSub2apiAccountsUseTheirOwnAccessTokenExpiry();
 testSyntheticIdTokenHasCodexParseableJwtFormat();
@@ -418,4 +451,5 @@ testCodexAuthJsonMatchesNativeShapeWhenMissingRefreshToken();
 testCodexAuthJsonPreservesRealRefreshTokenAndIdToken();
 testCodexManagerAuthJsonUsesEmptyRefreshTokenWhenMissing();
 testCodexManagerAuthJsonPreservesRealRefreshAndMetadata();
+testDownloadedJsonFileNameIncludesFullEmail();
 console.log("convert-session tests passed");
